@@ -1,0 +1,65 @@
+# openspec/config.yaml
+schema: spec-driven
+
+context: |
+  Tech stack: PHP 7.4+, WordPress 5.6+, single-file plugin (wp-mcp-bridge.php)
+  Architecture: REST API bridge plugin using WordPress REST API, WP-CLI fallback
+  Testing: No formal test suite — WordPress plugin with manual verification only
+  Style: WordPress coding standards (single class, procedural-style helpers)
+
+strict_tdd: false
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - Identify affected modules/packages
+  specs:
+    - Use Given/When/Then format for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Include sequence diagrams for complex flows
+    - Document architecture decisions with rationale
+  tasks:
+    - Group tasks by phase (infrastructure, implementation, testing)
+    - Use hierarchical numbering (1.1, 1.2, etc.)
+    - Keep tasks small enough to complete in one session
+  apply:
+    - Follow existing code patterns and conventions
+    - Load relevant coding skills for the project stack
+  verify:
+    - Run tests if test infrastructure exists
+    - Compare implementation against every spec scenario
+  archive:
+    - Warn before merging destructive deltas (large removals)
+
+testing:
+  strict_tdd: false
+  runner: NOT FOUND
+  layers:
+    unit: false
+    integration: false
+    e2e: false
+  coverage: false
+  quality:
+    linter: false
+    type_checker: false
+    formatter: false
+
+skills:
+  available:
+    - sdd-explore
+    - sdd-propose
+    - sdd-spec
+    - sdd-design
+    - sdd-tasks
+    - sdd-apply
+    - sdd-verify
+    - sdd-archive
+    - sdd-onboard
+    - judgment-day
+    - branch-pr
+    - issue-creation
+    - skill-creator
+    - skill-registry
+    - go-testing
+  project_level: []
