@@ -6,15 +6,15 @@
  *              si tampoco puede, usa PHP puro para todo.
  *              Incluye motor Divi 5 autonomous para generación de páginas
  *              (formato nativo de bloque, compatible con Divi 5).
- * Version:     1.5.8
- * Developer:   James Perez
+ * Version:     1.5.9
+ * Developer:   James Perez / AI Assistant
  * Requires at least: 5.6
  * Requires PHP: 7.4
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'WP_MCP_BRIDGE_VERSION', '1.5.8' );
+define( 'WP_MCP_BRIDGE_VERSION', '1.5.9' );
 define( 'WP_MCP_BRIDGE_NS',      'mcp-bridge/v1' );
 
 // Define WP_MCP_SECRET en wp-config.php:
@@ -1324,10 +1324,14 @@ class WP_MCP_Divi5_Generator {
         }
 
         // Root-level "content" (NOT nested inside "module")
+        // NOTE: Do NOT escape HTML here. json_encode() in block() handles special chars
+        // correctly and produces proper \uXXXX JSON unicode escapes. Calling
+        // divi_escape_html() would convert < to literal \u003c string which then
+        // gets double-encoded by JSON (\\u003c) and renders as literal \u003c text.
         $block['content'] = [
             'innerContent' => [
                 'desktop' => [
-                    'value' => $this->divi_escape_html( $html_value )
+                    'value' => $inner
                 ]
             ]
         ];
