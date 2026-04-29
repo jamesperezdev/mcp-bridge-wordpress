@@ -6,7 +6,7 @@
  *              si tampoco puede, usa PHP puro para todo.
  *              Incluye motor Divi 5 autonomous para generación de páginas
  *              (formato nativo de bloque, compatible con Divi 5).
- * Version:     1.5.9
+ * Version:     1.6.4
  * Developer:   James Perez / AI Assistant
  * Requires at least: 5.6
  * Requires PHP: 7.4
@@ -14,7 +14,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'WP_MCP_BRIDGE_VERSION', '1.5.9' );
+define( 'WP_MCP_BRIDGE_VERSION', '1.6.4' );
 define( 'WP_MCP_BRIDGE_NS',      'mcp-bridge/v1' );
 
 // Define WP_MCP_SECRET en wp-config.php:
@@ -161,7 +161,11 @@ class WP_MCP_NLP_Interpreter {
  */
 class WP_MCP_Divi5_Generator {
 
-    private $use_shortcodes = true; // This server's Divi 5.3.3 needs shortcode format
+    // Divi 5 native block format (NOT shortcodes). Do NOT flip this — the active
+    // site (admin.laiapanama.com, Divi 5.3.3+) needs the block comment format and the
+    // module.content.innerContent.desktop.value hierarchy for inner HTML.
+    private $builder_version_container = '5.0.0-public-alpha.23';
+    private $builder_version_content   = '5.0.0-public-beta.1';
 
     // ════════════════════════════════════════════════════════════════
     // DESIGN TOKENS — LAIA PANAMA BRAND SYSTEM
@@ -403,7 +407,7 @@ class WP_MCP_Divi5_Generator {
      * @return string Divi 5 block markup — body sections only (no header/footer)
      */
     public function generate_body_template( string $page ): string {
-        $placeholder = '<!-- wp:divi/placeholder -->';
+        $placeholder = '<!-- wp:divi/placeholder /-->';
         
         switch ( $page ) {
             case 'inicio':
@@ -1139,6 +1143,20 @@ class WP_MCP_Divi5_Generator {
      * Build container block (section, row, column) - matches Divi 5 native structure
      */
     private function build_container_block( string $module, array $attrs ): array {
+        // ── Shape normalizer (Fix G) ──────────────────────────────────
+        // Accept flat attrs ('background' => '#fff') and nested attrs
+        // ('background' => ['desktop'=>['value'=>['color'=>'#fff']]])
+        if ( isset( $attrs['background'] ) && is_string( $attrs['background'] ) ) {
+            $attrs['background'] = [ 'desktop' => [ 'value' => [ 'color' => $attrs['background'] ] ] ];
+        }
+        if ( isset( $attrs['padding'] ) && is_array( $attrs['padding'] )
+             && ! isset( $attrs['padding']['desktop'] ) ) {
+            $attrs['padding'] = [ 'desktop' => [ 'value' => $attrs['padding'] ] ];
+        }
+        if ( isset( $attrs['height'] ) && is_string( $attrs['height'] ) ) {
+            $attrs['height'] = [ 'desktop' => [ 'value' => $attrs['height'] ] ];
+        }
+
         $block = [
             'module' => [
                 'decoration' => [
@@ -1151,43 +1169,37 @@ class WP_MCP_Divi5_Generator {
                     ]
                 ]
             ],
-            'builderVersion' => '5.0.0-public-alpha.23',
-            'modulePreset' => ['default']
+            'builderVersion' => $this->builder_version_content,
+            'modulePreset'   => ( isset( $attrs['modulePreset'] ) )
+                ? ( is_array( $attrs['modulePreset'] ) ? $attrs['modulePreset'] : [ $attrs['modulePreset'] ] )
+                : [ 'default' ]
         ];
 
         switch ( $module ) {
             case 'section':
-                // Background color
-                if ( isset( $attrs['background'] ) ) {
-                    $color = $attrs['background'];
+                // Background color (normalized)
+                if ( isset( $attrs['background']['desktop']['value']['color'] ) ) {
                     $block['module']['decoration']['background'] = [
                         'desktop' => [
                             'value' => [
-                                'color' => $color
+                                'color' => $attrs['background']['desktop']['value']['color']
                             ]
                         ]
                     ];
                 }
-                // Padding
-                if ( isset( $attrs['padding'] ) ) {
+                // Padding (normalized)
+                if ( isset( $attrs['padding']['desktop']['value'] ) ) {
                     $block['module']['decoration']['spacing'] = [
                         'desktop' => [
                             'value' => [
-                                'padding' => $attrs['padding']
+                                'padding' => $attrs['padding']['desktop']['value']
                             ]
                         ]
                     ];
                 }
-                // Height
-                if ( isset( $attrs['height'] ) ) {
-                    $block['module']['decoration']['layout'] = [
-                        'desktop' => [
-                            'value' => [
-                                'display' => 'block',
-                                'max-height' => $attrs['height']
-                            ]
-                        ]
-                    ];
+                // Height (merged, does not destroy display:block) — Fix H
+                if ( isset( $attrs['height']['desktop']['value'] ) ) {
+                    $block['module']['decoration']['layout']['desktop']['value']['max-height'] = $attrs['height']['desktop']['value'];
                 }
                 // Admin label
                 if ( isset( $attrs['adminLabel'] ) ) {
@@ -1215,19 +1227,23 @@ class WP_MCP_Divi5_Generator {
 
             case 'column':
                 if ( isset( $attrs['type'] ) ) {
+                    // Accept both flat ('type' => '1_3') and nested
+                    $type_val = is_array( $attrs['type'] )
+                        ? ( $attrs['type']['desktop']['value'] ?? '4_4' )
+                        : $attrs['type'];
                     $block['module']['advanced'] = [
                         'type' => [
                             'desktop' => [
-                                'value' => $attrs['type']
+                                'value' => $type_val
                             ]
                         ]
                     ];
                 }
-                if ( isset( $attrs['padding'] ) ) {
+                if ( isset( $attrs['padding']['desktop']['value'] ) ) {
                     $block['module']['decoration']['spacing'] = [
                         'desktop' => [
                             'value' => [
-                                'padding' => $attrs['padding']
+                                'padding' => $attrs['padding']['desktop']['value']
                             ]
                         ]
                     ];
@@ -1266,7 +1282,7 @@ class WP_MCP_Divi5_Generator {
                     ]
                 ]
             ],
-            'builderVersion' => '5.0.0-public-beta.1',
+            'builderVersion' => $this->builder_version_content,
             'modulePreset' => [ $this->get_module_preset( $module ) ]
         ];
 
@@ -1328,10 +1344,15 @@ class WP_MCP_Divi5_Generator {
         // correctly and produces proper \uXXXX JSON unicode escapes. Calling
         // divi_escape_html() would convert < to literal \u003c string which then
         // gets double-encoded by JSON (\\u003c) and renders as literal \u003c text.
+        //
+        // BUT protect against HTML-comment close sequences that would break the
+        // Gutenberg block comment — turn '-->' and '<!--' into entity-escaped
+        // variants so the payload is safe inside `<!-- wp:divi/text { ... } /-->`.
+        $safe_inner = str_replace( [ '-->', '<!--' ], [ '--&gt;', '&lt;!--' ], $html_value );
         $block['content'] = [
             'innerContent' => [
                 'desktop' => [
-                    'value' => $inner
+                    'value' => $safe_inner
                 ]
             ]
         ];
@@ -1357,16 +1378,29 @@ class WP_MCP_Divi5_Generator {
                     ]
                 ]
             ],
-            'builderVersion' => '5.0.0-public-beta.1',
+            'builderVersion' => $this->builder_version_content,
             'modulePreset' => [ $this->get_module_preset( $module ) ]
         ];
 
         if ( $module === 'image' ) {
+            // Accept 'src' as:
+            //   - string: 'https://...'
+            //   - nested: ['desktop'=>['value'=>['image'=>'https://...']]]
+            //   - nested: ['desktop'=>['value'=>'https://...']]
             $img_value = [];
             if ( isset( $attrs['src'] ) ) {
-                $img_value['src'] = $attrs['src'];
+                if ( is_string( $attrs['src'] ) ) {
+                    $img_value['src'] = $attrs['src'];
+                } elseif ( is_array( $attrs['src'] ) ) {
+                    $nested = $attrs['src']['desktop']['value'] ?? null;
+                    if ( is_array( $nested ) && isset( $nested['image'] ) ) {
+                        $img_value['src'] = $nested['image'];
+                    } elseif ( is_string( $nested ) ) {
+                        $img_value['src'] = $nested;
+                    }
+                }
             }
-            if ( isset( $attrs['alt'] ) ) {
+            if ( isset( $attrs['alt'] ) && is_string( $attrs['alt'] ) ) {
                 $img_value['alt'] = $attrs['alt'];
             }
             $block['image'] = [
@@ -3138,7 +3172,7 @@ class WP_MCP_Bridge {
             'callback' => [ $this, 'create_divi_body_raw' ],
             'permission_callback' => $p,
             'args' => [
-                'page'    => ['required' => true,  'type' => 'string'],
+                'page'    => ['required' => false, 'type' => 'string', 'default' => ''],
                 'title'   => ['required' => false, 'type' => 'string', 'default' => ''],
                 'style'   => ['required' => false, 'type' => 'string', 'default' => 'modern'],
                 'content' => ['required' => false, 'type' => 'string', 'default' => ''],
@@ -3153,6 +3187,7 @@ class WP_MCP_Bridge {
                 'type'    => ['required' => true,  'type' => 'string'],
                 'title'   => ['required' => false, 'type' => 'string', 'default' => ''],
                 'style'   => ['required' => false, 'type' => 'string', 'default' => 'modern'],
+                'content' => ['required' => false, 'type' => 'string', 'default' => ''],
             ],
         ] );
 
@@ -3163,6 +3198,43 @@ class WP_MCP_Bridge {
             'args' => [
                 'post_id' => ['required' => true,  'type' => 'integer'],
                 'content' => ['required' => true,  'type' => 'string'],
+            ],
+        ] );
+
+        // ═════════════════════════════════════════════════════════════
+        //  UNIVERSAL DIVI 5 WRITER — the only endpoint an AI should use.
+        //  Works for ANY Divi 5 site. Persists any valid Divi 5 block
+        //  content the AI sends, with all required meta keys + cache invalidation.
+        //  The AI is responsible for generating valid Divi 5 block markup.
+        //  See /divi/contract for the strict rules.
+        // ═════════════════════════════════════════════════════════════
+        register_rest_route( $ns, '/divi/write', [
+            'methods'  => 'POST',
+            'callback' => [ $this, 'divi_write' ],
+            'permission_callback' => $p,
+            'args' => [
+                'title'         => ['required' => false, 'type' => 'string', 'default' => ''],
+                'content'       => ['required' => true,  'type' => 'string'],
+                'post_type'     => ['required' => false, 'type' => 'string', 'default' => 'page'],
+                'post_id'       => ['required' => false, 'type' => 'integer', 'default' => 0],
+                'template_type' => ['required' => false, 'type' => 'string', 'default' => ''],
+                'slug'          => ['required' => false, 'type' => 'string', 'default' => ''],
+                'status'        => ['required' => false, 'type' => 'string', 'default' => 'publish'],
+            ],
+        ] );
+
+        register_rest_route( $ns, '/divi/contract', [
+            'methods'  => 'GET',
+            'callback' => [ $this, 'divi_contract' ],
+            'permission_callback' => $p,
+        ] );
+
+        register_rest_route( $ns, '/divi/validate', [
+            'methods'  => 'POST',
+            'callback' => [ $this, 'divi_validate_endpoint' ],
+            'permission_callback' => $p,
+            'args' => [
+                'content' => ['required' => true, 'type' => 'string'],
             ],
         ] );
 
@@ -3673,7 +3745,7 @@ class WP_MCP_Bridge {
     //  DIVI ENGINE — REST CALLBACKS
     // ─────────────────────────────────────────────────────────
 
-    public function create_divi_page( WP_REST_Request $req ): WP_REST_Response {
+    public function create_divi_page( WP_REST_Request $req ) {
         if ( ! $this->is_divi_active() ) {
             return rest_ensure_response( new WP_Error( 'divi_inactive', 'Divi not active — please activate Elegant Themes Divi first.', [ 'status' => 400 ] ) );
         }
@@ -3708,28 +3780,25 @@ class WP_MCP_Bridge {
         elseif ( preg_match( '/\b(nuestra\s+historia|about\s+us|sobre\s+nosotros)\b/', $prompt_lower ) ) {
             $content = $divi->generate_body_template( 'nuestra-historia' );
         }
-        // Login page
+        // Login page (temporary: reuses inicio body until dedicated generator exists) — Fix D
         elseif ( preg_match( '/\b(login|ingreso|iniciar\s+sesión)\b/', $prompt_lower ) ) {
-            $content = $divi->generate_login_page();
+            $content = $divi->generate_body_template( 'inicio' );
         }
         // Default: NLP-based generation
         else {
             $layout_spec = $nlp->parse( $prompt );
             $design      = new WP_MCP_Design_System();
             $layout_spec = $design->apply_preset( $layout_spec, $style );
-            $content     = $divi->generate_page( $layout_spec, $style );
+            $content     = "<!-- wp:divi/placeholder /-->\n" . $divi->generate_page( $layout_spec, $style );
         }
 
         if ( empty( trim( $content ) ) ) {
             $content = $this->block_fallback_content();
         }
 
-        $page_id = wp_insert_post( [
-            'post_type'    => 'page',
-            'post_title'   => $title,
-            'post_content' => $content,
-            'post_status'  => 'publish',
-        ], true );
+        // Use the canonical Divi persistence helper (Fix A) — bypasses kses,
+        // writes all required Divi 5 meta keys, invalidates cache.
+        $page_id = $this->save_divi_post( 'page', $title, $content );
 
         if ( is_wp_error( $page_id ) ) {
             return rest_ensure_response( new WP_Error( 'page_creation_failed', $page_id->get_error_message(), [ 'status' => 500 ] ) );
@@ -3752,7 +3821,8 @@ class WP_MCP_Bridge {
             $this->block_fallback( 'text', '{}', 'Contenido de la página' )
         );
         $row = $this->block_fallback( 'row', '{"modulePreset":"default"}', $col );
-        return $this->block_fallback( 'section', '{"modulePreset":"default"}', $row );
+        $section = $this->block_fallback( 'section', '{"modulePreset":"default"}', $row );
+        return "<!-- wp:divi/placeholder /-->\n" . $section;
     }
 
     private function block_fallback( string $module, string $attrs, string $inner = '' ): string {
@@ -3832,7 +3902,7 @@ class WP_MCP_Bridge {
      * POST /wp-json/mcp/v1/divi/header
      * Body: { "title": "LAIA Panama Header" }
      */
-    public function create_divi_header_template( WP_REST_Request $req ): WP_REST_Response {
+    public function create_divi_header_template( WP_REST_Request $req ) {
         if ( ! $this->is_divi_active() ) {
             return rest_ensure_response( new WP_Error( 'divi_inactive', 'Divi is not the active theme. Activate Divi to use this endpoint.', [ 'status' => 400 ] ) );
         }
@@ -3846,21 +3916,12 @@ class WP_MCP_Bridge {
             return rest_ensure_response( new WP_Error( 'empty_template', 'Header template content was empty', [ 'status' => 500 ] ) );
         }
 
-        // Save as et_template post type — Divi Library stores templates this way.
-        // Divi Theme Builder can then assign these templates to header/footer/global sections.
-        $template_id = wp_insert_post( [
-            'post_type'    => 'et_template',
-            'post_title'   => $title,
-            'post_content' => $content,
-            'post_status'  => 'publish',
-        ], true );
+        // Use helper with template_type — bypass kses, write all Divi metas, invalidate cache
+        $template_id = $this->save_divi_post( 'et_template', $title, $content, 'header' );
 
         if ( is_wp_error( $template_id ) ) {
             return rest_ensure_response( new WP_Error( 'template_creation_failed', $template_id->get_error_message(), [ 'status' => 500 ] ) );
         }
-
-        // Store template type metadata so Theme Builder knows this is a header
-        update_post_meta( $template_id, '_et_template_type', 'header' );
 
         return rest_ensure_response( [
             'success'       => true,
@@ -3879,7 +3940,7 @@ class WP_MCP_Bridge {
      * POST /wp-json/mcp/v1/divi/footer
      * Body: { "title": "LAIA Panama Footer" }
      */
-    public function create_divi_footer_template( WP_REST_Request $req ): WP_REST_Response {
+    public function create_divi_footer_template( WP_REST_Request $req ) {
         if ( ! $this->is_divi_active() ) {
             return rest_ensure_response( new WP_Error( 'divi_inactive', 'Divi is not the active theme. Activate Divi to use this endpoint.', [ 'status' => 400 ] ) );
         }
@@ -3893,21 +3954,12 @@ class WP_MCP_Bridge {
             return rest_ensure_response( new WP_Error( 'empty_template', 'Footer template content was empty', [ 'status' => 500 ] ) );
         }
 
-        // Save as et_template post type — Divi Library stores templates this way.
-        // Divi Theme Builder can then assign these templates to header/footer/global sections.
-        $template_id = wp_insert_post( [
-            'post_type'    => 'et_template',
-            'post_title'   => $title,
-            'post_content' => $content,
-            'post_status'  => 'publish',
-        ], true );
+        // Use helper with template_type — bypass kses, write all Divi metas, invalidate cache
+        $template_id = $this->save_divi_post( 'et_template', $title, $content, 'footer' );
 
         if ( is_wp_error( $template_id ) ) {
             return rest_ensure_response( new WP_Error( 'template_creation_failed', $template_id->get_error_message(), [ 'status' => 500 ] ) );
         }
-
-        // Store template type metadata so Theme Builder knows this is a footer
-        update_post_meta( $template_id, '_et_template_type', 'footer' );
 
         return rest_ensure_response( [
             'success'       => true,
@@ -3926,7 +3978,7 @@ class WP_MCP_Bridge {
      * POST /wp-json/mcp/v1/divi/body
      * Body: { "page": "inicio", "title": "Inicio", "style": "modern" }
      */
-    public function create_divi_body_page( WP_REST_Request $req ): WP_REST_Response {
+    public function create_divi_body_page( WP_REST_Request $req ) {
         if ( ! $this->is_divi_active() ) {
             return rest_ensure_response( new WP_Error( 'divi_inactive', 'Divi is not the active theme. Activate Divi to use this endpoint.', [ 'status' => 400 ] ) );
         }
@@ -3946,21 +3998,12 @@ class WP_MCP_Bridge {
             return rest_ensure_response( new WP_Error( 'empty_content', "No body generator found for page: {$page}", [ 'status' => 500 ] ) );
         }
 
-        $page_id = wp_insert_post( [
-            'post_type'    => 'page',
-            'post_title'   => $title,
-            'post_content' => $content,
-            'post_status'  => 'publish',
-        ], true );
+        // Use helper — bypass kses, write all Divi metas, invalidate cache
+        $page_id = $this->save_divi_post( 'page', $title, $content );
 
         if ( is_wp_error( $page_id ) ) {
             return rest_ensure_response( new WP_Error( 'page_creation_failed', $page_id->get_error_message(), [ 'status' => 500 ] ) );
         }
-
-        // Add Divi 5 meta keys so Divi knows to use the builder
-        update_post_meta( $page_id, '_et_pb_use_builder', 'on' );
-        update_post_meta( $page_id, '_et_pb_use_divi_5', 'on' );
-        update_post_meta( $page_id, '_et_pb_show_page_creation', 'off' );
 
         return rest_ensure_response( [
             'success'      => true,
@@ -3974,66 +4017,54 @@ class WP_MCP_Bridge {
     }
 
     /**
-     * Create a Divi page body using DIRECT database write to bypass block editor.
-     * WordPress's block editor corrupts wp:divi/* blocks, so we write raw content
-     * directly via $wpdb to preserve the original format.
+     * Create a Divi page body.
+     *
+     * Accepts either:
+     *   - 'page'   → use one of the built-in generators (inicio, colecciones, contacto, nuestra-historia)
+     *   - 'content' → raw Divi 5 block content supplied by the AI client. This is the
+     *                 CANONICAL way for an MCP / AI to create a Divi 5 page from any
+     *                 model: the client generates the block markup itself and this
+     *                 endpoint persists it without corruption.
      *
      * POST /wp-json/mcp/v1/divi/body-raw
-     * Body: { "page": "inicio", "title": "Inicio", "style": "modern" }
+     * Body: { "title": "...", "page": "inicio" }         // built-in
+     *   OR: { "title": "...", "content": "<!-- wp:divi/section ... -->..." }  // custom
      */
-    public function create_divi_body_raw( WP_REST_Request $req ): WP_REST_Response {
+    public function create_divi_body_raw( WP_REST_Request $req ) {
         if ( ! $this->is_divi_active() ) {
             return rest_ensure_response( new WP_Error( 'divi_inactive', 'Divi is not the active theme. Activate Divi to use this endpoint.', [ 'status' => 400 ] ) );
         }
 
-        global $wpdb;
+        $page            = sanitize_text_field( $req->get_param( 'page' ) );
+        $title           = sanitize_text_field( $req->get_param( 'title' ) ) ?: ( $page ? ucfirst( $page ) : 'Nueva Página' );
+        $style           = sanitize_key( $req->get_param( 'style' ) ?: 'modern' );
+        $incoming_content = $req->get_param( 'content' );
 
-        $page  = sanitize_text_field( $req->get_param( 'page' ) );
-        $title = sanitize_text_field( $req->get_param( 'title' ) ) ?: ucfirst( $page );
-        $style = sanitize_key( $req->get_param( 'style' ) ?: 'modern' );
-
-        if ( empty( $page ) ) {
-            return rest_ensure_response( new WP_Error( 'missing_param', 'Missing required parameter: page', [ 'status' => 400 ] ) );
+        // Prefer the client-supplied content (what the MCP / AI sends).
+        if ( is_string( $incoming_content ) && trim( $incoming_content ) !== '' ) {
+            $content = $incoming_content;
+        } else {
+            if ( empty( $page ) ) {
+                return rest_ensure_response( new WP_Error(
+                    'missing_param',
+                    'Provide either "content" (raw Divi 5 block markup) or "page" (one of: inicio, colecciones, contacto, nuestra-historia)',
+                    [ 'status' => 400 ]
+                ) );
+            }
+            $divi    = new WP_MCP_Divi5_Generator();
+            $content = $divi->generate_body_template( $page );
         }
-
-        $divi   = new WP_MCP_Divi5_Generator();
-        $content = $divi->generate_body_template( $page );
 
         if ( empty( trim( $content ) ) ) {
-            return rest_ensure_response( new WP_Error( 'empty_content', "No body generator found for page: {$page}", [ 'status' => 500 ] ) );
+            return rest_ensure_response( new WP_Error( 'empty_content', 'Content was empty', [ 'status' => 500 ] ) );
         }
 
-        $now = current_time( 'mysql' );
-        $slug = sanitize_title( $title );
+        // Use the canonical helper — bypass kses, write all Divi metas, invalidate cache
+        $page_id = $this->save_divi_post( 'page', $title, $content );
 
-        $result = $wpdb->insert(
-            $wpdb->posts,
-            [
-                'post_type'    => 'page',
-                'post_title'   => $title,
-                'post_name'    => $slug,
-                'post_content' => $content,
-                'post_status'  => 'publish',
-                'post_author'  => get_current_user_id(),
-                'post_date'   => $now,
-                'post_date_gmt' => get_gmt_from_date( $now ),
-                'post_modified' => $now,
-                'post_modified_gmt' => get_gmt_from_date( $now ),
-            ],
-            [ '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s' ]
-        );
-
-        if ( $result === false ) {
-            return rest_ensure_response( new WP_Error( 'db_insert_failed', 'Failed to insert post: ' . $wpdb->last_error, [ 'status' => 500 ] ) );
+        if ( is_wp_error( $page_id ) ) {
+            return rest_ensure_response( new WP_Error( 'page_creation_failed', $page_id->get_error_message(), [ 'status' => 500 ] ) );
         }
-
-        $page_id = $wpdb->insert_id;
-        clean_post_cache( $page_id );
-
-        // Add Divi 5 meta keys so Divi knows to use the builder
-        update_post_meta( $page_id, '_et_pb_use_builder', 'on' );
-        update_post_meta( $page_id, '_et_pb_use_divi_5', 'on' );
-        update_post_meta( $page_id, '_et_pb_show_page_creation', 'off' );
 
         return rest_ensure_response( [
             'success'      => true,
@@ -4041,67 +4072,54 @@ class WP_MCP_Bridge {
             'url'          => get_permalink( $page_id ),
             'divi_version' => 'd5',
             'format'       => 'block_raw',
-            'body_page'    => $page,
-            'note'         => 'Content written directly to DB to preserve Divi 5 block format. Assign Header/Footer from Theme Builder.',
+            'body_page'    => $page ?: 'custom',
+            'source'       => $incoming_content ? 'client' : 'generator',
+            'note'         => 'Content written directly to DB with all required Divi 5 meta keys. Assign Header/Footer from Theme Builder.',
         ] );
     }
 
     /**
-     * Create a Divi header/footer template using DIRECT database write.
-     * Bypasses block editor to preserve wp:divi/* block format.
+     * Create a Divi header/footer template.
+     *
+     * Accepts either:
+     *   - content   → raw Divi 5 block markup from the AI client (PREFERRED)
+     *   - (nothing) → use the built-in generator
      *
      * POST /wp-json/mcp/v1/divi/template-raw
-     * Body: { "type": "header|footer", "title": "..." }
+     * Body: { "type": "header|footer", "title": "...", "content": "<!-- wp:divi/section ... -->" }
      */
-    public function create_divi_template_raw( WP_REST_Request $req ): WP_REST_Response {
+    public function create_divi_template_raw( WP_REST_Request $req ) {
         if ( ! $this->is_divi_active() ) {
             return rest_ensure_response( new WP_Error( 'divi_inactive', 'Divi is not the active theme. Activate Divi to use this endpoint.', [ 'status' => 400 ] ) );
         }
 
-        global $wpdb;
-
-        $type  = sanitize_text_field( $req->get_param( 'type' ) );
-        $title = sanitize_text_field( $req->get_param( 'title' ) ) ?: 'LAIA Panama ' . ucfirst( $type);
-        $style = sanitize_key( $req->get_param( 'style' ) ?: 'modern' );
+        $type             = sanitize_text_field( $req->get_param( 'type' ) );
+        $title            = sanitize_text_field( $req->get_param( 'title' ) ) ?: 'LAIA Panama ' . ucfirst( $type );
+        $style            = sanitize_key( $req->get_param( 'style' ) ?: 'modern' );
+        $incoming_content = $req->get_param( 'content' );
 
         if ( empty( $type ) || ! in_array( $type, [ 'header', 'footer' ], true ) ) {
             return rest_ensure_response( new WP_Error( 'invalid_type', 'Type must be "header" or "footer"', [ 'status' => 400 ] ) );
         }
 
-        $divi    = new WP_MCP_Divi5_Generator();
-        $content = $type === 'header' ? $divi->generate_header_template() : $divi->generate_footer_template();
+        // Prefer client-supplied content.
+        if ( is_string( $incoming_content ) && trim( $incoming_content ) !== '' ) {
+            $content = $incoming_content;
+        } else {
+            $divi    = new WP_MCP_Divi5_Generator();
+            $content = $type === 'header' ? $divi->generate_header_template() : $divi->generate_footer_template();
+        }
 
         if ( empty( trim( $content ) ) ) {
             return rest_ensure_response( new WP_Error( 'empty_template', 'Template content was empty', [ 'status' => 500 ] ) );
         }
 
-        $now = current_time( 'mysql' );
-        $slug = sanitize_title( $title );
+        // Use helper with template_type — bypass kses, write all Divi metas, invalidate cache
+        $template_id = $this->save_divi_post( 'et_template', $title, $content, $type );
 
-        $result = $wpdb->insert(
-            $wpdb->posts,
-            [
-                'post_type'    => 'et_template',
-                'post_title'   => $title,
-                'post_name'    => $slug,
-                'post_content' => $content,
-                'post_status'  => 'publish',
-                'post_author'  => get_current_user_id(),
-                'post_date'   => $now,
-                'post_date_gmt' => get_gmt_from_date( $now ),
-                'post_modified' => $now,
-                'post_modified_gmt' => get_gmt_from_date( $now ),
-            ],
-            [ '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s' ]
-        );
-
-        if ( $result === false ) {
-            return rest_ensure_response( new WP_Error( 'db_insert_failed', 'Failed to insert template: ' . $wpdb->last_error, [ 'status' => 500 ] ) );
+        if ( is_wp_error( $template_id ) ) {
+            return rest_ensure_response( new WP_Error( 'template_creation_failed', $template_id->get_error_message(), [ 'status' => 500 ] ) );
         }
-
-        $template_id = $wpdb->insert_id;
-        update_post_meta( $template_id, '_et_template_type', $type );
-        clean_post_cache( $template_id );
 
         return rest_ensure_response( [
             'success'       => true,
@@ -4115,14 +4133,13 @@ class WP_MCP_Bridge {
 
     /**
      * Update existing page content using DIRECT database write.
-     * Bypasses block editor to preserve wp:divi/* block format.
+     * Bypasses block editor to preserve wp:divi/* block format and ensures
+     * all Divi 5 meta keys are present so the render pipeline fires.
      *
      * POST /wp-json/mcp/v1/divi/update-content
      * Body: { "post_id": 123, "content": "..." }
      */
-    public function update_page_content_raw( WP_REST_Request $req ): WP_REST_Response {
-        global $wpdb;
-
+    public function update_page_content_raw( WP_REST_Request $req ) {
         $post_id = (int) $req->get_param( 'post_id' );
         $content = $req->get_param( 'content' );
 
@@ -4130,30 +4147,11 @@ class WP_MCP_Bridge {
             return rest_ensure_response( new WP_Error( 'missing_params', 'post_id and content are required', [ 'status' => 400 ] ) );
         }
 
-        $post = get_post( $post_id );
-        if ( ! $post ) {
-            return rest_ensure_response( new WP_Error( 'post_not_found', "Post ID {$post_id} not found", [ 'status' => 404 ] ) );
+        $result = $this->update_divi_post( $post_id, $content );
+
+        if ( is_wp_error( $result ) ) {
+            return rest_ensure_response( $result );
         }
-
-        $now = current_time( 'mysql' );
-
-        $result = $wpdb->update(
-            $wpdb->posts,
-            [
-                'post_content'   => $content,
-                'post_modified'  => $now,
-                'post_modified_gmt' => get_gmt_from_date( $now ),
-            ],
-            [ 'ID' => $post_id ],
-            [ '%s', '%s', '%s' ],
-            [ '%d' ]
-        );
-
-        if ( $result === false ) {
-            return rest_ensure_response( new WP_Error( 'db_update_failed', 'Failed to update post: ' . $wpdb->last_error, [ 'status' => 500 ] ) );
-        }
-
-        clean_post_cache( $post_id );
 
         return rest_ensure_response( [
             'success'  => true,
@@ -4340,6 +4338,511 @@ class WP_MCP_Bridge {
             return 'Page scores in average range. Consider adding more CTA elements and improving image alt attributes.';
         }
         return 'Page needs significant improvements. Focus on heading hierarchy, CTA presence, and performance optimization.';
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    //  DIVI 5 PERSISTENCE HELPER (Fix A) — single source of truth for
+    //  saving any Divi 5 content (pages, templates) with:
+    //    1. Direct $wpdb->insert  → bypasses kses/Gutenberg normalization
+    //    2. Placeholder injection → required by Divi 5 block parser
+    //    3. All 9 Divi meta keys  → makes Divi 5 activate the render pipeline
+    //    4. Cache invalidation    → invalidates ET static CSS cache
+    //
+    //  Use this from create_divi_page, create_divi_body_raw,
+    //  create_divi_template_raw, update_page_content_raw, and any future
+    //  endpoint that writes Divi content.
+    // ═════════════════════════════════════════════════════════════════
+
+    /**
+     * UNIVERSAL WRITE ENDPOINT — the canonical way for any AI to create
+     * or update any Divi 5 page on any Divi 5 site.
+     *
+     * POST /wp-json/mcp-bridge/v1/divi/write
+     *
+     * Body:
+     *   - content (REQUIRED, string) — raw Divi 5 block markup (see /divi/contract)
+     *   - title (string) — post title. Required when creating.
+     *   - post_type (string, default 'page') — 'page' | 'post' | 'et_template' | any CPT
+     *   - template_type (string, optional) — 'header' | 'footer' | 'body' | '' — only used when post_type = 'et_template'
+     *   - post_id (integer, optional) — if provided and > 0, UPDATES that post instead of creating new
+     *   - slug (string, optional) — override auto-generated slug
+     *   - status (string, default 'publish')
+     *
+     * On success: { success: true, post_id, url, created_or_updated }
+     * On validation failure: { code: 'divi_invalid_content', message, errors: [...] }
+     */
+    public function divi_write( WP_REST_Request $req ) {
+        $title          = sanitize_text_field( (string) $req->get_param( 'title' ) );
+        $content        = (string) $req->get_param( 'content' );
+        $post_type      = sanitize_key( (string) $req->get_param( 'post_type' ) ?: 'page' );
+        $post_id        = (int) $req->get_param( 'post_id' );
+        $template_type  = sanitize_key( (string) $req->get_param( 'template_type' ) );
+        $slug           = sanitize_title( (string) $req->get_param( 'slug' ) );
+        $status         = sanitize_key( (string) $req->get_param( 'status' ) ?: 'publish' );
+
+        if ( trim( $content ) === '' ) {
+            return rest_ensure_response( new WP_Error(
+                'divi_missing_content',
+                'The "content" parameter is required and must contain Divi 5 block markup. Call GET /divi/contract for the rules.',
+                [ 'status' => 400 ]
+            ) );
+        }
+
+        // Validate content against the Divi 5 contract
+        $validation = $this->validate_divi5_content( $content );
+        if ( ! $validation['ok'] ) {
+            return rest_ensure_response( new WP_Error(
+                'divi_invalid_content',
+                'Content does not follow the Divi 5 block contract. Call GET /divi/contract for the rules. Fix the errors and retry.',
+                [
+                    'status'  => 422,
+                    'errors'  => $validation['errors'],
+                    'contract_url' => rest_url( 'mcp-bridge/v1/divi/contract' ),
+                ]
+            ) );
+        }
+
+        // UPDATE branch
+        if ( $post_id > 0 ) {
+            $post = get_post( $post_id );
+            if ( ! $post ) {
+                return rest_ensure_response( new WP_Error( 'post_not_found', "Post ID {$post_id} not found", [ 'status' => 404 ] ) );
+            }
+            $result = $this->update_divi_post( $post_id, $content );
+            if ( is_wp_error( $result ) ) {
+                return rest_ensure_response( $result );
+            }
+            if ( $title !== '' ) {
+                wp_update_post( [ 'ID' => $post_id, 'post_title' => $title ] );
+            }
+            return rest_ensure_response( [
+                'success'            => true,
+                'post_id'            => $post_id,
+                'url'                => get_permalink( $post_id ),
+                'created_or_updated' => 'updated',
+                'post_type'          => get_post_type( $post_id ),
+            ] );
+        }
+
+        // CREATE branch
+        if ( $title === '' ) {
+            return rest_ensure_response( new WP_Error(
+                'divi_missing_title',
+                'The "title" parameter is required when creating (no post_id provided).',
+                [ 'status' => 400 ]
+            ) );
+        }
+
+        $created_id = $this->save_divi_post(
+            $post_type,
+            $title,
+            $content,
+            ( $post_type === 'et_template' && $template_type !== '' ) ? $template_type : null,
+            [
+                'slug'   => $slug,
+                'status' => $status,
+            ]
+        );
+
+        if ( is_wp_error( $created_id ) ) {
+            return rest_ensure_response( $created_id );
+        }
+
+        return rest_ensure_response( [
+            'success'            => true,
+            'post_id'            => $created_id,
+            'url'                => get_permalink( $created_id ),
+            'created_or_updated' => 'created',
+            'post_type'          => $post_type,
+            'template_type'      => $template_type ?: null,
+        ] );
+    }
+
+    /**
+     * Returns the strict contract that an AI must follow to build Divi 5
+     * content. This is the single source of truth — do NOT rely on any
+     * model's training data about Divi 5, just read this contract.
+     */
+    public function divi_contract( WP_REST_Request $req ) {
+        $builder_version = defined( 'ET_BUILDER_PRODUCT_VERSION' ) ? ET_BUILDER_PRODUCT_VERSION : '5.0.0-public-beta.1';
+        return rest_ensure_response( [
+            'version'         => WP_MCP_BRIDGE_VERSION,
+            'builder_version' => $builder_version,
+            'endpoint'        => rest_url( 'mcp-bridge/v1/divi/write' ),
+            'summary'         => 'Send valid Divi 5 block markup as the `content` field. The plugin persists it without corruption, writes all required Divi meta keys, and invalidates the static CSS cache so the page renders correctly.',
+            'rules' => [
+                'R1 — Placeholder'       => 'The post_content MUST start with `<!-- wp:divi/placeholder /-->` (self-closing). The plugin will inject it automatically if missing, but include it for clarity.',
+                'R2 — Root structure'    => 'After the placeholder, the content is a sequence of `<!-- wp:divi/section -->...<!-- /wp:divi/section -->` blocks. No other top-level block is allowed.',
+                'R3 — Nesting'           => 'Every section contains rows. Every row contains columns. Every column contains content modules (text, heading, button, image, blurb, cta, ...). No exceptions.',
+                'R4 — Container tags'    => 'section, row, column, accordion, accordion_item use OPEN/CLOSE comments: `<!-- wp:divi/section {...} -->...<!-- /wp:divi/section -->`',
+                'R5 — Self-closing tags' => 'All content modules (text, heading, button, image, blurb, cta, testimonial, pricing_table, contact_form, placeholder) are SELF-CLOSING: end with ` /-->` (note the slash BEFORE the closing `-->`). NEVER write `<!-- /wp:divi/text -->`.',
+                'R6 — Never use wp:divi/content' => 'There is NO block called `wp:divi/content`. If you want text, emit a single self-closing `wp:divi/text` block. Do NOT wrap a `wp:divi/content` block inside a `wp:divi/text` block — that combination produces a page that looks empty in the frontend.',
+                'R7 — JSON attrs hierarchy' => 'Attributes are JSON inside the block comment. Two top-level keys every module MUST have: `module` (styling/layout/meta) and `builderVersion` (string, set to "' . $builder_version . '"). `modulePreset` is an array, e.g. ["default"].',
+                'R8 — Text/heading content' => 'For `wp:divi/text`: content goes in top-level `content.innerContent.desktop.value` (string of HTML). Do NOT nest it inside `module`. Headings are emitted as `wp:divi/text` with the `<h1>...<h6>` tag INSIDE the HTML (Divi 5 on this install renders wp:divi/heading inconsistently).',
+                'R9 — Button content'    => 'For `wp:divi/button`: the label goes in top-level `button.innerContent.desktop.value.text`.',
+                'R10 — Image content'    => 'For `wp:divi/image`: src + alt go in top-level `image.innerContent.desktop.value.{src,alt}`.',
+                'R11 — HTML escape'      => 'HTML inside innerContent.value is serialized as a JSON string. You MUST NOT include the substring `-->` or `<!--` in that HTML — they break the outer block comment. Use `--&gt;` if you truly need the character. Also ensure double-quotes inside HTML are properly JSON-escaped (the MCP server does this for you if you use json.dumps or equivalent).',
+                'R12 — Column types'     => 'Column `type` is one of: "4_4" (full width), "1_2", "1_3", "2_3", "1_4", "3_4", "1_5", "2_5", "3_5", "4_5", "1_6". Write it at attrs.type.desktop.value OR simply as attrs.type = "1_3" (the server normalizes).',
+                'R13 — Background/padding shape' => 'For section/row/column attrs you may use flat shape (background: "#fff", padding: {top,right,bottom,left}) OR nested shape (background.desktop.value.color, padding.desktop.value.top). Server normalizes both.',
+                'R14 — No shortcodes'    => 'Divi 5 content is NEVER shortcodes like [et_pb_section]. ALWAYS block comments `<!-- wp:divi/... -->`. If you emit shortcodes the page will not render.',
+                'R15 — No Gutenberg blocks' => 'Do NOT mix Gutenberg core blocks (wp:paragraph, wp:heading, wp:columns, wp:group, wp:image). Only `wp:divi/*` blocks are allowed.',
+                'R16 — Meta keys are automatic' => 'You do NOT need to set _et_pb_use_builder, _et_builder_version or any _et_* meta. The plugin writes them all for you. Just send the content.',
+            ],
+            'valid_modules' => [
+                'containers' => [ 'section', 'row', 'column', 'accordion', 'accordion_item' ],
+                'content'    => [ 'text', 'heading', 'button', 'image', 'blurb', 'cta', 'testimonial', 'pricing_table', 'contact_form', 'placeholder' ],
+            ],
+            'minimal_example' => "<!-- wp:divi/placeholder /-->\n<!-- wp:divi/section {\"module\":{\"decoration\":{\"background\":{\"desktop\":{\"value\":{\"color\":\"#ffffff\"}}},\"spacing\":{\"desktop\":{\"value\":{\"padding\":{\"top\":\"80px\",\"bottom\":\"80px\"}}}}}},\"builderVersion\":\"" . $builder_version . "\",\"modulePreset\":[\"default\"]} -->\n<!-- wp:divi/row {\"builderVersion\":\"" . $builder_version . "\",\"modulePreset\":[\"default\"]} -->\n<!-- wp:divi/column {\"module\":{\"advanced\":{\"type\":{\"desktop\":{\"value\":\"4_4\"}}}},\"builderVersion\":\"" . $builder_version . "\",\"modulePreset\":[\"default\"]} -->\n<!-- wp:divi/text {\"module\":{},\"content\":{\"innerContent\":{\"desktop\":{\"value\":\"\\u003ch1\\u003eHola mundo\\u003c/h1\\u003e\\u003cp\\u003eEste es un p\\u00e1rrafo.\\u003c/p\\u003e\"}}},\"builderVersion\":\"" . $builder_version . "\",\"modulePreset\":[\"default\"]} /-->\n<!-- /wp:divi/column -->\n<!-- /wp:divi/row -->\n<!-- /wp:divi/section -->",
+            'common_mistakes' => [
+                'Using wp:divi/content — REMOVE it, just use wp:divi/text.',
+                'Using <!-- /wp:divi/text --> — self-close with ` /-->` instead.',
+                'Forgetting the placeholder at the start — plugin injects it, but include it.',
+                'Emitting shortcodes [et_pb_section] — use block comments instead.',
+                'Using wp:paragraph, wp:heading or other Gutenberg blocks — use wp:divi/* only.',
+                'Setting builderVersion to something other than the current value — use "' . $builder_version . '".',
+                'Forgetting to close a container — every section, row, column, accordion needs its `<!-- /wp:divi/... -->` closer.',
+                'Including raw `-->` inside innerContent HTML — breaks the outer comment. Replace with `--&gt;`.',
+            ],
+        ] );
+    }
+
+    /**
+     * Validate content without writing it — useful for AI clients that
+     * want to double-check before persisting.
+     */
+    public function divi_validate_endpoint( WP_REST_Request $req ) {
+        $content = (string) $req->get_param( 'content' );
+        $result  = $this->validate_divi5_content( $content );
+        return rest_ensure_response( $result );
+    }
+
+    /**
+     * Validate Divi 5 block content against the contract.
+     * Returns ['ok' => bool, 'errors' => [...]].
+     */
+    public function validate_divi5_content( string $content ): array {
+        $errors = [];
+
+        // Rule: non-empty
+        if ( trim( $content ) === '' ) {
+            return [ 'ok' => false, 'errors' => [ [
+                'rule'    => 'R1',
+                'message' => 'Content is empty.',
+            ] ] ];
+        }
+
+        // Rule R14: no Divi 4 shortcodes
+        if ( preg_match( '/\[et_pb_[a-z_]+/i', $content ) ) {
+            $errors[] = [
+                'rule'    => 'R14',
+                'message' => 'Divi 4 shortcodes detected (e.g. [et_pb_section]). Divi 5 uses block comment format only.',
+            ];
+        }
+
+        // Rule R15: no core Gutenberg blocks (only wp:divi/*)
+        if ( preg_match( '/<!--\s*wp:(?!divi\/)([a-z][a-z0-9\/_-]*)/i', $content, $m ) ) {
+            $errors[] = [
+                'rule'    => 'R15',
+                'message' => "Non-Divi block found: wp:{$m[1]}. Only wp:divi/* blocks are allowed.",
+            ];
+        }
+
+        // Rule R6: no wp:divi/content block — it's not a real module
+        if ( preg_match( '/<!--\s*wp:divi\/content\b/i', $content ) ) {
+            $errors[] = [
+                'rule'    => 'R6',
+                'message' => 'wp:divi/content is not a valid Divi 5 module. Use a single wp:divi/text with the HTML inside content.innerContent.desktop.value.',
+            ];
+        }
+
+        // Rule R5: content modules must be self-closing
+        $content_modules = [ 'text', 'heading', 'button', 'image', 'blurb', 'cta', 'testimonial', 'pricing_table', 'contact_form' ];
+        foreach ( $content_modules as $mod ) {
+            // closer found = wrong (e.g. <!-- /wp:divi/text -->)
+            if ( preg_match( '/<!--\s*\/wp:divi\/' . $mod . '\s*-->/i', $content ) ) {
+                $errors[] = [
+                    'rule'    => 'R5',
+                    'message' => "wp:divi/{$mod} must be self-closing (end with ` /-->`). Remove the <!-- /wp:divi/{$mod} --> closing tag and make the opening one self-closing.",
+                ];
+            }
+        }
+
+        // Rule R4: container blocks must balance open/close
+        $containers = [ 'section', 'row', 'column', 'accordion', 'accordion_item' ];
+        foreach ( $containers as $mod ) {
+            $open_count  = preg_match_all( '/<!--\s*wp:divi\/' . $mod . '\s+[^\/]*?-->/i', $content );
+            // Opening can also be without attrs: <!-- wp:divi/section -->
+            $open_count2 = preg_match_all( '/<!--\s*wp:divi\/' . $mod . '\s*-->/i', $content );
+            $open_total  = (int) $open_count + (int) $open_count2;
+            $close_total = preg_match_all( '/<!--\s*\/wp:divi\/' . $mod . '\s*-->/i', $content );
+            if ( $open_total !== $close_total ) {
+                $errors[] = [
+                    'rule'    => 'R4',
+                    'message' => "Unbalanced wp:divi/{$mod}: {$open_total} open vs {$close_total} close. Every container needs its closer.",
+                ];
+            }
+        }
+
+        // Rule R11: detect literal `-->` inside HTML payload of innerContent.
+        // Instead of matching block comments with recursive regex (fragile with
+        // nested JSON), we parse linearly:
+        //   - walk through the string, alternating "inside comment" / "outside comment"
+        //   - every `-->` found while NOT inside a `<!-- ... -->` pair is an error
+        //
+        // This is deterministic and robust regardless of how deep the JSON nests.
+        $len        = strlen( $content );
+        $i          = 0;
+        $stray_hits = 0;
+        while ( $i < $len ) {
+            $open = strpos( $content, '<!--', $i );
+            if ( $open === false ) {
+                // No more comments; any `-->` from here on is stray
+                if ( strpos( $content, '-->', $i ) !== false ) {
+                    $stray_hits++;
+                }
+                break;
+            }
+            // Any `-->` between $i and $open is stray
+            if ( strpos( substr( $content, $i, $open - $i ), '-->' ) !== false ) {
+                $stray_hits++;
+            }
+            // Find matching `-->`
+            $close = strpos( $content, '-->', $open );
+            if ( $close === false ) {
+                // Unterminated comment — that's a separate problem, but skip
+                break;
+            }
+            $i = $close + 3;
+        }
+        if ( $stray_hits > 0 ) {
+            $errors[] = [
+                'rule'    => 'R11',
+                'message' => "Found {$stray_hits} literal `-->` outside of any block comment. This usually means HTML inside innerContent.value contains `-->` literally, which breaks the outer Gutenberg block comment. Replace `-->` with `--&gt;` inside HTML payloads.",
+            ];
+        }
+
+        // Rule R7: each wp:divi/* block MUST have valid JSON attrs when present.
+        // Parse block opening tags linearly to support deeply-nested JSON.
+        $offset = 0;
+        $json_errors = 0;
+        while ( ( $pos = strpos( $content, '<!-- wp:divi/', $offset ) ) !== false
+                || ( $pos = strpos( $content, '<!--wp:divi/', $offset ) ) !== false ) {
+            // Advance past the module-name token
+            $after_prefix = strpos( $content, ' ', $pos + 4 );
+            if ( $after_prefix === false ) break;
+            // If next char is `{`, we have JSON attrs. Otherwise skip (no-attrs block).
+            $j = $after_prefix;
+            while ( $j < $len && ctype_space( $content[ $j ] ) ) $j++;
+            if ( $j >= $len || $content[ $j ] !== '{' ) {
+                $offset = $pos + 4;
+                continue;
+            }
+            // Walk JSON balancing braces (respecting simple strings)
+            $depth   = 0;
+            $in_str  = false;
+            $escape  = false;
+            $start   = $j;
+            for ( $k = $j; $k < $len; $k++ ) {
+                $c = $content[ $k ];
+                if ( $escape ) { $escape = false; continue; }
+                if ( $in_str ) {
+                    if ( $c === '\\' ) { $escape = true; continue; }
+                    if ( $c === '"'  ) { $in_str = false; }
+                    continue;
+                }
+                if ( $c === '"' ) { $in_str = true; continue; }
+                if ( $c === '{' ) { $depth++; continue; }
+                if ( $c === '}' ) {
+                    $depth--;
+                    if ( $depth === 0 ) {
+                        $json_str = substr( $content, $start, $k - $start + 1 );
+                        $decoded  = json_decode( $json_str, true );
+                        if ( $decoded === null && json_last_error() !== JSON_ERROR_NONE ) {
+                            $json_errors++;
+                            if ( $json_errors <= 5 ) {
+                                $errors[] = [
+                                    'rule'    => 'R7',
+                                    'message' => 'Invalid JSON in block attrs at byte ' . $start . ': ' . json_last_error_msg() . '. Check quotes, commas and make sure inner HTML is properly JSON-escaped.',
+                                    'snippet' => mb_substr( $json_str, 0, 200 ),
+                                ];
+                            }
+                        }
+                        $offset = $k + 1;
+                        break;
+                    }
+                }
+            }
+            if ( $depth !== 0 ) {
+                $errors[] = [
+                    'rule'    => 'R7',
+                    'message' => 'Unbalanced JSON braces in block attrs starting at byte ' . $start . '.',
+                ];
+                break;
+            }
+        }
+
+        // OLD regex-based R7 block removed — replaced with linear parser above.
+
+        return [
+            'ok'     => empty( $errors ),
+            'errors' => $errors,
+        ];
+    }
+
+    /**
+     * Save a Divi 5 post with all the meta keys Divi needs to render it.
+     *
+     * @param string      $post_type     'page', 'post', 'et_template', or any CPT
+     * @param string      $title         Post title
+     * @param string      $content       post_content (may or may not include placeholder)
+     * @param string|null $template_type 'header'|'footer'|'body'|null — only for et_template
+     * @param array       $opts          { slug?: string, status?: string }
+     * @return int|WP_Error Post ID on success, WP_Error on failure
+     */
+    public function save_divi_post( string $post_type, string $title, string $content, ?string $template_type = null, array $opts = [] ) {
+        global $wpdb;
+
+        // 1. Ensure placeholder is present (self-closing) at the very start
+        $content = $this->ensure_divi_placeholder( $content );
+
+        // 2. Build DB insert payload
+        $now    = current_time( 'mysql' );
+        $slug   = ! empty( $opts['slug'] ) ? sanitize_title( $opts['slug'] ) : sanitize_title( $title );
+        $status = ! empty( $opts['status'] ) ? sanitize_key( $opts['status'] ) : 'publish';
+        $author = get_current_user_id() ?: 1;
+
+        $result = $wpdb->insert(
+            $wpdb->posts,
+            [
+                'post_type'         => $post_type,
+                'post_title'        => $title,
+                'post_name'         => $slug,
+                'post_content'      => $content,
+                'post_status'       => $status,
+                'post_author'       => $author,
+                'post_date'         => $now,
+                'post_date_gmt'     => get_gmt_from_date( $now ),
+                'post_modified'     => $now,
+                'post_modified_gmt' => get_gmt_from_date( $now ),
+                'post_excerpt'      => '',
+                'post_content_filtered' => '',
+                'to_ping'           => '',
+                'pinged'            => '',
+                'comment_status'    => 'closed',
+                'ping_status'       => 'closed',
+                'guid'              => '',
+                'menu_order'        => 0,
+                'post_parent'       => 0,
+            ],
+            [ '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d' ]
+        );
+
+        if ( $result === false ) {
+            return new WP_Error( 'db_insert_failed', 'Failed to insert post: ' . $wpdb->last_error, [ 'status' => 500 ] );
+        }
+
+        $post_id = (int) $wpdb->insert_id;
+
+        // Fill GUID (WP post-insert convention)
+        $wpdb->update(
+            $wpdb->posts,
+            [ 'guid' => home_url( '/?p=' . $post_id ) ],
+            [ 'ID' => $post_id ],
+            [ '%s' ],
+            [ '%d' ]
+        );
+
+        // 3. Meta keys required by Divi 5 to activate its render pipeline
+        $builder_version = defined( 'ET_BUILDER_PRODUCT_VERSION' ) ? ET_BUILDER_PRODUCT_VERSION : '5.0.0-public-beta.1';
+
+        update_post_meta( $post_id, '_et_pb_use_builder',           'on' );
+        update_post_meta( $post_id, '_et_pb_use_divi_5',            'on' );
+        update_post_meta( $post_id, '_et_pb_show_page_creation',    'off' );
+        update_post_meta( $post_id, '_et_pb_old_content',           '' );
+        update_post_meta( $post_id, '_et_builder_version',          $builder_version );
+        update_post_meta( $post_id, '_et_pb_built_for_post_type',   $post_type );
+        update_post_meta( $post_id, '_et_pb_page_layout',           'et_no_sidebar' );
+        update_post_meta( $post_id, '_et_pb_enable_shortcode_tracking', '' );
+        update_post_meta( $post_id, '_et_dynamic_cached_shortcodes',    '' );
+        update_post_meta( $post_id, '_et_dynamic_cached_attributes',    '' );
+
+        if ( $template_type !== null && $post_type === 'et_template' ) {
+            update_post_meta( $post_id, '_et_template_type', $template_type );
+        }
+
+        // 4. Cache invalidation — critical so Divi re-renders from the new content
+        clean_post_cache( $post_id );
+        delete_post_meta( $post_id, '_et_dynamic_cached_shortcodes' );
+        delete_post_meta( $post_id, '_et_dynamic_cached_attributes' );
+
+        if ( class_exists( 'ET_Core_PageResource' ) ) {
+            \ET_Core_PageResource::remove_static_resources( $post_id, 'all' );
+        }
+
+        return $post_id;
+    }
+
+    /**
+     * Update an existing Divi 5 post's content (bypass kses) and refresh metas + cache.
+     *
+     * @param int    $post_id
+     * @param string $content
+     * @return bool|WP_Error
+     */
+    public function update_divi_post( int $post_id, string $content ) {
+        global $wpdb;
+
+        $post = get_post( $post_id );
+        if ( ! $post ) {
+            return new WP_Error( 'post_not_found', "Post ID {$post_id} not found", [ 'status' => 404 ] );
+        }
+
+        $content = $this->ensure_divi_placeholder( $content );
+        $now     = current_time( 'mysql' );
+
+        $result = $wpdb->update(
+            $wpdb->posts,
+            [
+                'post_content'      => $content,
+                'post_modified'     => $now,
+                'post_modified_gmt' => get_gmt_from_date( $now ),
+            ],
+            [ 'ID' => $post_id ],
+            [ '%s', '%s', '%s' ],
+            [ '%d' ]
+        );
+
+        if ( $result === false ) {
+            return new WP_Error( 'db_update_failed', 'Failed to update post: ' . $wpdb->last_error, [ 'status' => 500 ] );
+        }
+
+        $builder_version = defined( 'ET_BUILDER_PRODUCT_VERSION' ) ? ET_BUILDER_PRODUCT_VERSION : '5.0.0-public-beta.1';
+
+        update_post_meta( $post_id, '_et_pb_use_builder',         'on' );
+        update_post_meta( $post_id, '_et_pb_use_divi_5',          'on' );
+        update_post_meta( $post_id, '_et_builder_version',        $builder_version );
+        update_post_meta( $post_id, '_et_pb_built_for_post_type', get_post_type( $post_id ) );
+
+        clean_post_cache( $post_id );
+        delete_post_meta( $post_id, '_et_dynamic_cached_shortcodes' );
+        delete_post_meta( $post_id, '_et_dynamic_cached_attributes' );
+
+        if ( class_exists( 'ET_Core_PageResource' ) ) {
+            \ET_Core_PageResource::remove_static_resources( $post_id, 'all' );
+        }
+
+        return true;
+    }
+
+    /**
+     * Ensure the post_content starts with `<!-- wp:divi/placeholder /-->`.
+     * Safe to call multiple times — only prepends if missing.
+     */
+    private function ensure_divi_placeholder( string $content ): string {
+        if ( strpos( $content, 'wp:divi/placeholder' ) !== false ) {
+            return $content;
+        }
+        return "<!-- wp:divi/placeholder /-->\n" . ltrim( $content );
     }
 }
 
